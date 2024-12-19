@@ -1,0 +1,197 @@
+import pandas as pd
+import tkinter as tk
+from tkinter import messagebox, filedialog
+from tkcalendar import Calendar
+from datetime import datetime, timedelta
+
+
+# Función para seleccionar el archivo Excel
+def seleccionar_archivo():
+    archivo = filedialog.askopenfilename(
+        title="Selecciona el archivo Excel",
+        filetypes=[("Archivos de Excel", "*.xlsx *.xls")]
+    )
+    return archivo
+
+
+# Función para guardar el archivo de salida
+def guardar_archivo():
+    archivo = filedialog.asksaveasfilename(
+        title="Guardar archivo como",
+        defaultextension=".xlsx",
+        filetypes=[("Archivos de Excel", "*.xlsx")]
+    )
+    return archivo
+
+
+# Función para obtener el lunes de hace dos semanas
+def obtener_fecha_lunes():
+    hoy = datetime.today()
+    dias_para_lunes = hoy.weekday()
+    lunes_hace_dos_semanas = hoy - timedelta(days=dias_para_lunes + 7)
+    return lunes_hace_dos_semanas.strftime("%Y-%m-%d")
+
+
+# Función para obtener los pacientes únicos y la última fecha de control
+def obtener_ultimos_controles(df, columna_identificacion, columna_fecha, fecha_referencia):
+    df[columna_identificacion] = df[columna_identificacion].astype(str)
+    df[columna_fecha] = pd.to_datetime(df[columna_fecha], errors='coerce')
+    pacientes_ultimos_controles = df.groupby(columna_identificacion)[columna_fecha].max()
+    resultados = pacientes_ultimos_controles.reset_index()
+    resultados.columns = [columna_identificacion, "Último control (fecha)"]
+    resultados["Último control (fecha)"] = resultados["Último control (fecha)"].dt.strftime('%Y-%m-%d')
+    fecha_referencia = pd.to_datetime(fecha_referencia, errors='coerce')
+    resultados["Días transcurridos"] = (fecha_referencia - pd.to_datetime(resultados["Último control (fecha)"])).dt.days
+    return resultados
+
+
+# Función para contar el número de controles por paciente con condiciones en el código CUPS
+def contar_controles_por_paciente(df, columna_identificacion, columna_cups):
+    df[columna_identificacion] = df[columna_identificacion].astype(str)
+    df[columna_cups] = df[columna_cups].astype(str)
+    codigos_interes = ["890301", "890201", "890205", "890305", "890350", "890250"]
+    controles_filtrados = df[df[columna_cups].isin(codigos_interes)]
+    controles = controles_filtrados.groupby(columna_identificacion).size().reset_index(name='Número de controles')
+    return controles
+
+
+# Función para obtener la última fecha de controles ginecológicos
+def obtener_ultimo_control_ginecologico(df, columna_identificacion, columna_fecha, columna_cups):
+    codigos_ginecologia = ["890350", "890250"]
+    controles_ginecologia = df[df[columna_cups].isin(codigos_ginecologia)]
+    controles_ginecologia[columna_fecha] = pd.to_datetime(controles_ginecologia[columna_fecha], errors='coerce')
+    ultimos_controles_ginecologia = controles_ginecologia.groupby(columna_identificacion)[columna_fecha].max()
+    resultados_ginecologia = ultimos_controles_ginecologia.reset_index()
+    resultados_ginecologia.columns = [columna_identificacion, "Último control ginecológico (fecha)"]
+    resultados_ginecologia["Último control ginecológico (fecha)"] = resultados_ginecologia[
+        "Último control ginecológico (fecha)"].dt.strftime('%Y-%m-%d')
+    return resultados_ginecologia
+
+
+# Nueva función para obtener la clasificación de riesgo de preeclampsia
+def obtener_clasificacion_preeclampsia(df, columna_identificacion, columna_clasificacion, columna_fecha):
+    # Convertir la columna de clasificación a cadena y la de fecha a datetime
+    df[columna_clasificacion] = df[columna_clasificacion].astype(str)
+    df[columna_fecha] = pd.to_datetime(df[columna_fecha], errors='coerce')
+
+    # Filtrar solo los valores 4 (ALTO) y 5 (BAJO)
+    df_filtrado = df[df[columna_clasificacion].isin(['4', '5'])]
+
+    # Para cada paciente, obtener la clasificación más reciente (basada en la fecha)
+    df_ultima_clasificacion = df_filtrado.loc[df_filtrado.groupby(columna_identificacion)[columna_fecha].idxmax()]
+
+    # Crear una nueva columna con el resultado
+    df_ultima_clasificacion['Clasificación riesgo preeclampsia'] = df_ultima_clasificacion[columna_clasificacion].apply(
+        lambda x: "ALTO" if x == "4" else ("BAJO" if x == "5" else ""))
+
+    # Resumir por paciente, con la clasificación más reciente
+    clasificaciones_finales = df_ultima_clasificacion[[columna_identificacion, 'Clasificación riesgo preeclampsia']]
+
+    return clasificaciones_finales
+
+
+# Función para obtener la clasificación del riesgo gestacional
+def obtener_clasificacion_riesgo_gestacional(df, columna_identificacion, columna_clasificacion, columna_fecha):
+    # Convertir la columna de clasificación a cadena y la de fecha a datetime
+    df[columna_clasificacion] = df[columna_clasificacion].astype(str)
+    df[columna_fecha] = pd.to_datetime(df[columna_fecha], errors='coerce')
+
+    # Filtrar solo los valores 4 (ALTO) y 5 (BAJO)
+    df_filtrado = df[df[columna_clasificacion].isin(['4', '5'])]
+
+    # Para cada paciente, obtener la clasificación más reciente (basada en la fecha)
+    df_ultima_clasificacion = df_filtrado.loc[df_filtrado.groupby(columna_identificacion)[columna_fecha].idxmax()]
+
+    # Crear una nueva columna con el resultado
+    df_ultima_clasificacion['Clasificación riesgo gestacional'] = df_ultima_clasificacion[columna_clasificacion].apply(
+        lambda x: "ALTO" if x == "4" else ("BAJO" if x == "5" else ""))
+
+    # Resumir por paciente, con la clasificación más reciente
+    clasificaciones_finales = df_ultima_clasificacion[[columna_identificacion, 'Clasificación riesgo gestacional']]
+
+    return clasificaciones_finales
+
+
+# Función general para ejecutar todas las tareas
+# Función general para ejecutar todas las tareas
+def procesar_datos():
+    try:
+        ruta_entrada = filedialog.askopenfilename(
+            title="Selecciona el archivo Excel",
+            filetypes=[("Archivos de Excel", "*.xlsx *.xls")]
+        )
+
+        if not ruta_entrada:
+            return
+
+        df = pd.read_excel(ruta_entrada, sheet_name="tipo-3")
+
+        fecha_referencia = calendario.get_date()
+
+        # Llamar a las funciones individuales
+        resultados_ultimos_controles = obtener_ultimos_controles(df, columna_identificacion="No Identificación",
+                                                                 columna_fecha="Fecha de la tecnología en salud",
+                                                                 fecha_referencia=fecha_referencia)
+        resultados_controles = contar_controles_por_paciente(df, columna_identificacion="No Identificación",
+                                                             columna_cups="Código CUPS de la tecnología en salud")
+        resultados_ginecologia = obtener_ultimo_control_ginecologico(df, columna_identificacion="No Identificación",
+                                                                     columna_fecha="Fecha de la tecnología en salud",
+                                                                     columna_cups="Código CUPS de la tecnología en salud")
+        resultados_clasificacion_preeclampsia = obtener_clasificacion_preeclampsia(df,
+                                                                                   columna_identificacion="No Identificación",
+                                                                                   columna_clasificacion="Clasificación del riesgo de preeclampsia",
+                                                                                   columna_fecha="Fecha de la tecnología en salud")
+        resultados_clasificacion_riesgo_gestacional = obtener_clasificacion_riesgo_gestacional(df,
+                                                                                               columna_identificacion="No Identificación",
+                                                                                               columna_clasificacion="Clasificación del riesgo gestacional",
+                                                                                               columna_fecha="Fecha de la tecnología en salud")
+
+        # Unir todos los resultados
+        resultados_combinados = pd.merge(resultados_ultimos_controles, resultados_controles, on="No Identificación",
+                                         how="outer")
+        resultados_combinados = pd.merge(resultados_combinados, resultados_ginecologia, on="No Identificación",
+                                         how="outer")
+        resultados_combinados = pd.merge(resultados_combinados, resultados_clasificacion_preeclampsia,
+                                         on="No Identificación", how="outer")
+        resultados_combinados = pd.merge(resultados_combinados, resultados_clasificacion_riesgo_gestacional,
+                                         on="No Identificación", how="outer")
+
+        ruta_salida = filedialog.asksaveasfilename(
+            title="Guardar archivo como",
+            defaultextension=".xlsx",
+            filetypes=[("Archivos de Excel", "*.xlsx")]
+        )
+
+        if not ruta_salida:
+            return
+
+        with pd.ExcelWriter(ruta_salida, engine='xlsxwriter') as writer:
+            resultados_combinados.to_excel(writer, index=False, sheet_name="Resultados Combinados")
+
+        messagebox.showinfo("Éxito", f"Datos procesados correctamente y exportados a {ruta_salida}")
+
+    except Exception as e:
+        messagebox.showerror("Error", f"Ocurrió un error: {e}")
+
+
+# Función para mostrar la interfaz gráfica
+def mostrar_interfaz():
+    global calendario
+    ventana = tk.Tk()
+    ventana.title("Procesar Datos Excel")
+    ventana.geometry("400x400")
+
+    fecha_lunes = obtener_fecha_lunes()
+
+    calendario = Calendar(ventana, selectmode="day", date_pattern="yyyy-mm-dd", showweeknumbers=False)
+    calendario.selection_set(fecha_lunes)  # Cambiar el método para seleccionar la fecha por defecto
+    calendario.pack(pady=10)
+
+    boton_procesar = tk.Button(ventana, text="Procesar Todos los Datos", command=procesar_datos)
+    boton_procesar.pack(pady=20)
+
+    ventana.mainloop()
+
+
+# Ejecutar la interfaz
+mostrar_interfaz()

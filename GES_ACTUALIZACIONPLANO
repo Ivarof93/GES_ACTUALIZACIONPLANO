@@ -221,6 +221,17 @@ def clasificar_pospartos(df, columna_identificacion, columna_cups, columna_final
 
     return df_pospartos
 
+def obtener_tipo_documento(df, columna_identificacion, columna_tipo_identificacion):
+    """
+    Asigna el tipo de documento (basado en la columna 'Tipo identificación Usuaria')
+    a cada paciente, asegurándose de que se manejen los posibles valores únicos o categorías.
+    """
+    # Eliminar duplicados en el DataFrame según la columna de identificación para obtener un listado único
+    tipos_documentos = df[[columna_identificacion, columna_tipo_identificacion]].drop_duplicates()
+
+    # Retorna un dataframe con el tipo de documento por cada paciente
+    return tipos_documentos
+
 
 # Función general para ejecutar todas las tareas
 def procesar_datos():
@@ -266,6 +277,7 @@ def procesar_datos():
                                                           "Fecha de la tecnología en salud")
         pospartos = clasificar_pospartos(df, "No Identificación", "Código CUPS de la tecnología en salud",
                                          "Finalidad de la tecnología en salud (Consultas o procedimientos)")
+        tipos_documentos = obtener_tipo_documento(df, "No Identificación", "Tipo identificación Usuaria")
 
         # Unir todos los resultados
         resultados_combinados = pd.merge(resultados_ultimos_controles, resultados_controles, on="No Identificación",
@@ -281,6 +293,7 @@ def procesar_datos():
         resultados_combinados = pd.merge(resultados_combinados, resultados_its, on="No Identificación", how="outer")
         resultados_combinados = pd.merge(resultados_combinados, resultados_partos, on="No Identificación", how="outer")
         resultados_combinados = pd.merge(resultados_combinados, pospartos, on="No Identificación", how="outer")
+        resultados_combinados = resultados_combinados.merge(tipos_documentos, on="No Identificación", how="left")
 
         ruta_salida = filedialog.asksaveasfilename(
             title="Guardar archivo como",

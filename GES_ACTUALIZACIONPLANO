@@ -112,7 +112,116 @@ def obtener_clasificacion_riesgo_gestacional(df, columna_identificacion, columna
     return clasificaciones_finales
 
 
-# Función general para ejecutar todas las tareas
+def clasificar_suministro_acido_acetilsalicilico(df, columna_identificacion, columna_suministro):
+    """
+    Clasifica el suministro de ácido acetilsalicílico según las siguientes reglas:
+    - "SI" si al menos un suministro tiene "1".
+    - "NO" si no tiene "1" pero al menos un suministro tiene "0".
+    - En blanco si no hay ni "1" ni "0".
+    """
+    # Asegurarse de que la columna de suministro es texto
+    df[columna_suministro] = df[columna_suministro].astype(str)
+
+    # Inicializar lista para resultados
+    resultados = []
+
+    # Agrupar por paciente
+    grupo_pacientes = df.groupby(columna_identificacion)
+
+    for paciente, data in grupo_pacientes:
+        # Obtener los valores únicos de suministro para este paciente
+        valores_unicos = set(data[columna_suministro])
+
+        if "1" in valores_unicos:
+            resultados.append((paciente, "SI"))
+        elif "0" in valores_unicos:
+            resultados.append((paciente, "NO"))
+        else:
+            resultados.append((paciente, ""))
+
+    # Crear un DataFrame con los resultados
+    df_resultados = pd.DataFrame(resultados, columns=[columna_identificacion, "Suministro de ácido acetilsalicílico"])
+
+    return df_resultados
+
+
+def obtener_ultimo_control_its(df, columna_identificacion, columna_cups, columna_fecha):
+    """
+    Obtiene las fechas más recientes para ITS (Infecciones de Transmisión Sexual)
+    según los CUPS especificados y las formatea a 'aaaa-mm-dd'.
+    """
+    # Lista de CUPS que corresponden a ITS
+    cups_its = ["906220", "906222", "906317", "906223", "906318", "906324",
+                "906221", "906225", "906262", "906266", "906332", "906249", "906039"]
+
+    # Filtrar únicamente las filas con CUPS de ITS
+    df_its = df[df[columna_cups].astype(str).isin(cups_its)]
+
+    # Convertir la columna de fechas al formato datetime
+    df_its[columna_fecha] = pd.to_datetime(df_its[columna_fecha], errors='coerce', format="%Y-%m-%d")
+
+    # Seleccionar la última fecha por paciente
+    resultados_its = (
+        df_its.groupby(columna_identificacion)[columna_fecha]
+        .max()
+        .reset_index()
+        .rename(columns={columna_fecha: "Última fecha ITS"})
+    )
+
+    # Formatear las fechas a 'aaaa-mm-dd'
+    resultados_its["Última fecha ITS"] = resultados_its["Última fecha ITS"].dt.strftime('%Y-%m-%d')
+
+    return resultados_its
+
+def obtener_ultimo_control_partos(df, columna_identificacion, columna_cups, columna_fecha):
+    """
+    Obtiene las fechas más recientes para partos según los CUPS especificados y las formatea a 'aaaa-mm-dd'.
+    """
+    # Lista de CUPS que corresponden a partos
+    cups_partos = ["721003", "735301", "740001", "740002", "732201", "735930",
+                   "735931", "750302", "750301", "750303"]
+
+    # Filtrar únicamente las filas con CUPS de partos
+    df_partos = df[df[columna_cups].astype(str).isin(cups_partos)]
+
+    # Convertir la columna de fechas al formato datetime
+    df_partos[columna_fecha] = pd.to_datetime(df_partos[columna_fecha], errors='coerce', format="%Y-%m-%d")
+
+    # Seleccionar la última fecha por paciente
+    resultados_partos = (
+        df_partos.groupby(columna_identificacion)[columna_fecha]
+        .max()
+        .reset_index()
+        .rename(columns={columna_fecha: "Última fecha partos"})
+    )
+
+    # Formatear las fechas a 'aaaa-mm-dd'
+    resultados_partos["Última fecha partos"] = resultados_partos["Última fecha partos"].dt.strftime('%Y-%m-%d')
+
+    return resultados_partos
+
+def clasificar_pospartos(df, columna_identificacion, columna_cups, columna_finalidad):
+    """
+    Clasifica a los pacientes como "SI" para POSPARTOS si cumplen:
+    1. Tienen un CUPS en la lista específica.
+    2. La finalidad es igual a "1".
+    """
+    # Lista de CUPS correspondientes a POSPARTOS
+    cups_pospartos = ["890201", "890301"]
+
+    # Filtrar las filas que cumplen con los criterios
+    df_pospartos = df[
+        (df[columna_cups].astype(str).isin(cups_pospartos)) &
+        (df[columna_finalidad].astype(str) == "1")
+    ]
+
+    # Crear una nueva columna que indique "SI" para POSPARTOS
+    df_pospartos = df_pospartos[[columna_identificacion]].drop_duplicates()
+    df_pospartos["POSPARTOS"] = "SI"
+
+    return df_pospartos
+
+
 # Función general para ejecutar todas las tareas
 def procesar_datos():
     try:
@@ -145,6 +254,18 @@ def procesar_datos():
                                                                                                columna_identificacion="No Identificación",
                                                                                                columna_clasificacion="Clasificación del riesgo gestacional",
                                                                                                columna_fecha="Fecha de la tecnología en salud")
+        resultados_suministro_acido = clasificar_suministro_acido_acetilsalicilico(df,
+                                                                                   columna_identificacion="No Identificación",
+                                                                                   columna_suministro="Suministro de ácido acetilsalicílico - AS")
+        resultados_its = obtener_ultimo_control_its(df, columna_identificacion="No Identificación",
+                                                    columna_cups="Código CUPS de la tecnología en salud",
+                                                    columna_fecha="Fecha de la tecnología en salud")
+
+        resultados_partos = obtener_ultimo_control_partos(df, "No Identificación",
+                                                          "Código CUPS de la tecnología en salud",
+                                                          "Fecha de la tecnología en salud")
+        pospartos = clasificar_pospartos(df, "No Identificación", "Código CUPS de la tecnología en salud",
+                                         "Finalidad de la tecnología en salud (Consultas o procedimientos)")
 
         # Unir todos los resultados
         resultados_combinados = pd.merge(resultados_ultimos_controles, resultados_controles, on="No Identificación",
@@ -155,6 +276,11 @@ def procesar_datos():
                                          on="No Identificación", how="outer")
         resultados_combinados = pd.merge(resultados_combinados, resultados_clasificacion_riesgo_gestacional,
                                          on="No Identificación", how="outer")
+        resultados_combinados = pd.merge(resultados_combinados, resultados_suministro_acido, on="No Identificación",
+                                         how="outer")
+        resultados_combinados = pd.merge(resultados_combinados, resultados_its, on="No Identificación", how="outer")
+        resultados_combinados = pd.merge(resultados_combinados, resultados_partos, on="No Identificación", how="outer")
+        resultados_combinados = pd.merge(resultados_combinados, pospartos, on="No Identificación", how="outer")
 
         ruta_salida = filedialog.asksaveasfilename(
             title="Guardar archivo como",
